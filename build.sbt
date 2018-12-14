@@ -59,13 +59,13 @@ resolvers ++= Seq(
 resolvers += "Sonatype Releases" at "https://oss.sonatype.org/content/repositories/releases/"
 
 // Provide a managed dependency on X if -DXVersion="" is supplied on the command line.
-// [TODO] is simpler clearer?
 val defaultVersions = Map(
   "chisel3" -> "3.2-SNAPSHOT",
-  "chisel-iotesters" -> "1.1.+"
+  "chisel-iotesters" -> "1.2.5",
+  "dsptools" -> "1.1.4"
   )
 
-libraryDependencies ++= (Seq("chisel3","chisel-iotesters").map {
+libraryDependencies ++= (Seq("chisel3","dsptools", "chisel-iotesters").map {
   dep: String => "edu.berkeley.cs" %% dep % sys.props.getOrElse(dep + "Version", defaultVersions(dep)) })
 
 
