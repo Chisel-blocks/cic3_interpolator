@@ -7,7 +7,7 @@
 package cic3_interpolator
 
 import chisel3._
-//import chisel3.experimental._
+import chisel3.experimental.{withClock, withClockAndReset}
 import chisel3.util._
 import dsptools._
 import dsptools.numbers._
