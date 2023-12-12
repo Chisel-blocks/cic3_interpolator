@@ -1,21 +1,24 @@
 // Finitie impulse filter
-package hb_interpolator
+package cic_interpolator
 import config._
-import config.{HbConfig}
+import config.{CicConfig}
 
 import java.io.File
 
 import chisel3._
 import chisel3.experimental.FixedPoint
+import chisel3.util.{log2Ceil}
 import chisel3.stage.{ChiselStage, ChiselGeneratorAnnotation}
 import chisel3.stage.ChiselGeneratorAnnotation
 
 import dsptools._
 import dsptools.numbers.DspComplex
 
-class HB_InterpolatorIO(resolution: Int, gainBits: Int) extends Bundle {
+class CIC_InterpolatorIO(resolution: Int, gainBits: Int) extends Bundle {
   val in = new Bundle {
-    val clock_high = Input(Clock())
+    val clockfast = Input(Clock())
+    val derivscale = Input(UInt(gainBits.W))
+    val derivshift = Input(UInt(log2Ceil(resolution).W))
     val scale  = Input(UInt(gainBits.W))
     val iptr_A = Input(DspComplex(SInt(resolution.W), SInt(resolution.W)))
   }
@@ -24,84 +27,54 @@ class HB_InterpolatorIO(resolution: Int, gainBits: Int) extends Bundle {
   }
 }
 
-class HB_Interpolator(config: HbConfig) extends Module {
-    val io = IO(new HB_InterpolatorIO(resolution=config.resolution, gainBits=config.gainBits))
+class CIC_Interpolator(config: CicConfig) extends Module {
+    val io = IO(new CIC_InterpolatorIO(resolution=config.resolution, gainBits=config.gainBits))
     val data_reso = config.resolution
     val calc_reso = config.resolution * 2
 
-    val inregs  = RegInit(VecInit(Seq.fill(2)(DspComplex.wire(0.S(data_reso.W), 0.S(data_reso.W))))) //registers for sampling rate reduction
-    inregs.map(_:=io.in.iptr_A)
+    val slowregs  = RegInit(VecInit(Seq.fill(config.order + 1)(DspComplex.wire(0.S(calc_reso.W), 0.S(calc_reso.W)))))
+    val minusregs = RegInit(VecInit(Seq.fill(config.order + 1)(DspComplex.wire(0.S(calc_reso.W), 0.S(calc_reso.W)))))
 
-    //The half clock rate domain
-    val slowregs  = RegInit(VecInit(Seq.fill(2)(DspComplex.wire(0.S(data_reso.W), 0.S(data_reso.W))))) //registers for sampling rate reduction
-    (slowregs, inregs).zipped.map(_ := _)
-
-    val sub1coeffs = config.H.indices.filter(_ % 2 == 0).map(config.H(_)) //Even coeffs for Fir1
-    println(sub1coeffs)
-
-    val tapped1 = sub1coeffs.reverse.map(tap => slowregs(0) * tap)
-    val registerchain1 = RegInit(VecInit(Seq.fill(tapped1.length + 1)(DspComplex.wire(0.S(calc_reso.W), 0.S(calc_reso.W)))))
-
-    for ( i <- 0 until tapped1.length) {
-        if (i == 0) {
-	        registerchain1(i + 1) := tapped1(i)
+    for (i <- 0 to config.order) {
+        if (i <= 0) {
+            slowregs(i).real := RegNext(io.in.iptr_A.real) 
+            slowregs(i).imag := RegNext(io.in.iptr_A.imag)
+            minusregs(i) := slowregs(i)
         } else {
-	        registerchain1(i + 1) := DspComplex.wire(registerchain1(i).real + tapped1(i).real, registerchain1(i).imag + tapped1(i).imag)
+            slowregs(i) := DspComplex.wire(slowregs(i - 1).real - minusregs(i - 1).real, slowregs(i - 1).imag - minusregs(i - 1).imag)
+            minusregs(i) := slowregs(i)
         }
     }
-
-    val subfil1 = registerchain1(tapped1.length)
-
-    val sub2coeffs = config.H.indices.filter(_ % 2 == 1).map(config.H(_)) //Odd coeffs for Fir 2
-    println(sub2coeffs)
-
-    val tapped2 = sub2coeffs.reverse.map(tap => slowregs(1) * tap)
-    val registerchain2 = RegInit(VecInit(Seq.fill(tapped2.length + 1)(DspComplex.wire(0.S(calc_reso.W), 0.S(calc_reso.W)))))
-
-    for ( i <- 0 until tapped2.length) {
-        if (i == 0) {
-	        registerchain2(i + 1) := tapped2(i)
-        } else {
-	        registerchain2(i + 1) := DspComplex.wire(registerchain2(i).real + tapped2(i).real, registerchain2(i).imag + tapped2(i).imag)
-        }
-    }
-
-    val subfil2 = registerchain2(tapped2.length)
-
-    //The double clock rate domain
-    withClock (io.in.clock_high){
-        val outreg = RegInit(DspComplex.wire(0.S(data_reso.W), 0.S(data_reso.W)))
-
-        //Slow clock sampled with fast one to control the ouput multiplexer
-        val clkreg = Wire(Bool())
-        clkreg := RegNext(clock.asUInt)
-
-        when (clkreg === true.B) { 
-            outreg.real := (subfil1.real * io.in.scale)(calc_reso - 1, calc_reso - data_reso).asSInt
-            outreg.imag := (subfil1.imag * io.in.scale)(calc_reso - 1, calc_reso - data_reso).asSInt
-        }.elsewhen (clkreg === false.B) { 
-            outreg.real := (subfil2.real * io.in.scale)(calc_reso - 1, calc_reso - data_reso).asSInt
-            outreg.imag := (subfil2.imag * io.in.scale)(calc_reso - 1, calc_reso - data_reso).asSInt
-        }
-
-        io.out.Z := outreg
+    
+     withClock (io.in.clockfast){
+         val integregs  = RegInit(VecInit(Seq.fill(config.order + 1)(DspComplex.wire(0.S(calc_reso.W), 0.S(calc_reso.W))))) 
+            for (i <- 0 to config.order) {
+                if (i <= 0){
+                    integregs(i).real := slowregs(config.order).real * io.in.derivscale << io.in.derivshift
+                    integregs(i).imag := slowregs(config.order).imag * io.in.derivscale << io.in.derivshift
+                } else { 
+                    integregs(i) :=  DspComplex.wire(integregs(i - 1).real + integregs(i).real, integregs(i - 1).imag + integregs(i).imag)
+                }
+            }
+          io.out.Z.real := RegNext(integregs(config.order).real(calc_reso - 1, calc_reso - data_reso).asSInt)
+          io.out.Z.imag := RegNext(integregs(config.order).imag(calc_reso - 1, calc_reso - data_reso).asSInt)
     }
 }
 
 
 
 /** Generates verilog or sv*/
-object HB_Interpolator extends App with OptionParser {
+object CIC_Interpolator extends App with OptionParser {
   // Parse command-line arguments
   val (options, arguments) = getopts(default_opts, args.toList)
   printopts(options, arguments)
 
   val config_file = options("config_file")
   val target_dir = options("td")
-  var hb_config: Option[HbConfig] = None
-  HbConfig.loadFromFile(config_file) match {
+  var cic_config: Option[CicConfig] = None
+  CicConfig.loadFromFile(config_file) match {
     case Left(config) => {
-      hb_config = Some(config)
+      cic_config = Some(config)
     }
     case Right(err) => {
       System.err.println(s"\nCould not load HB configuration from file:\n${err.msg}")
@@ -110,10 +83,10 @@ object HB_Interpolator extends App with OptionParser {
   }
 
   // Generate verilog
-  val annos = Seq(ChiselGeneratorAnnotation(() => new HB_Interpolator(config=hb_config.get)))
+  val annos = Seq(ChiselGeneratorAnnotation(() => new CIC_Interpolator(config=cic_config.get)))
   //(new ChiselStage).execute(arguments.toArray, annos)
   val sysverilog = (new ChiselStage).emitSystemVerilog(
-    new HB_Interpolator(config=hb_config.get),
+    new CIC_Interpolator(config=cic_config.get),
      
     //args
     Array("--target-dir", target_dir))
