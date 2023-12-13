@@ -19,7 +19,6 @@ class CIC_InterpolatorIO(resolution: Int, gainBits: Int) extends Bundle {
     val clockfast = Input(Clock())
     val derivscale = Input(UInt(gainBits.W))
     val derivshift = Input(UInt(log2Ceil(resolution).W))
-    val scale  = Input(UInt(gainBits.W))
     val iptr_A = Input(DspComplex(SInt(resolution.W), SInt(resolution.W)))
   }
   val out = new Bundle {
