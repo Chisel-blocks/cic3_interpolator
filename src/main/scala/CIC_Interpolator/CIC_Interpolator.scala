@@ -40,7 +40,8 @@ class CIC_Interpolator(config: CicConfig) extends Module {
             slowregs(i).imag := RegNext(io.in.iptr_A.imag)
             minusregs(i) := slowregs(i)
         } else {
-            slowregs(i) := DspComplex.wire(slowregs(i - 1).real - minusregs(i - 1).real, slowregs(i - 1).imag - minusregs(i - 1).imag)
+            slowregs(i).real := slowregs(i - 1).real - minusregs(i - 1).real
+            slowregs(i).imag := slowregs(i - 1).imag - minusregs(i - 1).imag
             minusregs(i) := slowregs(i)
         }
     }
@@ -52,7 +53,8 @@ class CIC_Interpolator(config: CicConfig) extends Module {
                     integregs(i).real := slowregs(config.order).real * io.in.derivscale << io.in.derivshift
                     integregs(i).imag := slowregs(config.order).imag * io.in.derivscale << io.in.derivshift
                 } else { 
-                    integregs(i) :=  DspComplex.wire(integregs(i - 1).real + integregs(i).real, integregs(i - 1).imag + integregs(i).imag)
+                    integregs(i).real :=  integregs(i - 1).real + integregs(i).real
+                    integregs(i).imag :=  integregs(i - 1).imag + integregs(i).imag
                 }
             }
           io.out.Z.real := RegNext(integregs(config.order).real(calc_reso - 1, calc_reso - data_reso).asSInt)
