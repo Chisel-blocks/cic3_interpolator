@@ -53,8 +53,8 @@ class CIC_Interpolator(config: CicConfig) extends Module {
                     integregs(i).real := slowregs(config.order).real * io.in.derivscale << io.in.derivshift
                     integregs(i).imag := slowregs(config.order).imag * io.in.derivscale << io.in.derivshift
                 } else { 
-                    integregs(i).real :=  integregs(i - 1).real + integregs(i).real
-                    integregs(i).imag :=  integregs(i - 1).imag + integregs(i).imag
+                    integregs(i).real :=  integregs(i - 1).real + RegNext(integregs(i).real)
+                    integregs(i).imag :=  integregs(i - 1).imag + RegNext(integregs(i).imag)
                 }
             }
           io.out.Z.real := RegNext(integregs(config.order).real(calc_reso - 1, calc_reso - data_reso).asSInt)
